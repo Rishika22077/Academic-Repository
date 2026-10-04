@@ -1,168 +1,543 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api } from "../api.js";
-import { useAuth } from "../auth.jsx";
-import ReportButtons from "../components/ReportButtons.jsx";
-import { Notice, StatusBadge, errorMessage, formatDate } from "../components/common.jsx";
+import {
+  Notice,
+  StatusBadge,
+  errorMessage,
+  formatDate,
+  typeLabel,
+} from "../components/common.jsx";
+import { useAuth } from "../Auth.jsx";
 
-const EXTERNAL = { target: "_blank", rel: "noopener noreferrer" };
-
-/** One page for both kinds: kind = "project" | "paper". */
-export default function ItemDetail({ kind }) {
-  const { id } = useParams();
-  const { user } = useAuth();
-  const navigate = useNavigate();
-  const isProject = kind === "project";
-  const base = isProject ? "/api/projects" : "/api/research-papers";
-
-  const [item, setItem] = useState(null);
-  const [error, setError] = useState("");
-
-  const load = useCallback(() => {
-    setItem(null);
-    api.get(`${base}/${id}`).then(setItem).catch((e) => setError(errorMessage(e)));
-  }, [base, id]);
-  useEffect(load, [load]);
-
-  if (error && !item) return <div className="container narrow"><Notice>{error}</Notice><p><Link to="/">Back to the repository</Link></p></div>;
-  if (!item) return <div className="container"><p className="muted">Loading…</p></div>;
-
-  const isOwner = item.submittedBy.id === user.id;
-  const canReview =
-    ["PENDING", "RESUBMITTED"].includes(item.status) &&
-    (user.role === "ADMIN" || (user.role === "FACULTY" && item.faculty.id === user.id));
-  const canEdit = user.role === "STUDENT" && isOwner && item.status === "REJECTED";
-  const canDelete = user.role === "ADMIN" || (isOwner && item.status !== "APPROVED");
-
-  const remove = async () => {
-    if (!window.confirm("Delete this submission and its PDF? This cannot be undone.")) return;
-    try {
-      await api.del(`${base}/${id}`);
-      navigate(user.role === "ADMIN" ? "/admin" : "/student", { replace: true });
-    } catch (e) {
-      setError(errorMessage(e));
-    }
-  };
-
-  const metaYear = !isProject && item.publicationYear ? item.publicationYear : item.academicYear;
-
-  return (
-    <div className="container detail">
-      <p className="meta">{isProject ? "Capstone project" : "Research paper"} · {item.category} · {metaYear}</p>
-      <h1 className="detail-title">{item.title}</h1>
-      {item.status !== "APPROVED" && <p><StatusBadge status={item.status} /></p>}
-      <Notice>{error}</Notice>
-
-      {item.status === "REJECTED" && item.rejectionReason && (
-        <div className="callout rejected">
-          <strong>Reason for rejection</strong>
-          <p>{item.rejectionReason}</p>
-          {canEdit && <Link className="btn" to={`/student/edit/${kind}/${item.id}`}>Edit and resubmit</Link>}
-        </div>
-      )}
-
-      {canReview && <ReviewPanel base={base} id={id} onDone={setItem} />}
-
-      <section>
-        <h2>Abstract</h2>
-        <p className="abstract">{item.abstractText}</p>
-      </section>
-
-      <section>
-        <h2>Details</h2>
-        <dl className="facts">
-          {isProject ? (
-            <Fact label="Team members">{item.members.map((m) => m.name).join(", ")}</Fact>
-          ) : (
-            <Fact label="Authors">{item.authors}</Fact>
-          )}
-          <Fact label={isProject ? "Faculty guide" : "Faculty reviewer"}>{item.faculty.name}</Fact>
-          <Fact label="Department">{item.department}</Fact>
-          {!isProject && item.affiliation && <Fact label="Affiliation">{item.affiliation}</Fact>}
-          {!isProject && item.venue && <Fact label="Published in">{item.venue}{item.publicationYear ? ` (${item.publicationYear})` : ""}</Fact>}
-          {!isProject && item.doi && <Fact label="DOI"><a href={item.doiUrl} {...EXTERNAL}>{item.doi}</a></Fact>}
-          {(isProject ? item.technologies : item.researchAreas).length > 0 && (
-            <Fact label={isProject ? "Technologies used" : "Research areas"}>{(isProject ? item.technologies : item.researchAreas).join(", ")}</Fact>
-          )}
-          <Fact label="Keywords">{item.keywords.join(" · ")}</Fact>
-          <Fact label="Submitted">{formatDate(item.submittedAt)}</Fact>
-          {item.approvedAt && <Fact label="Approved on">{formatDate(item.approvedAt)}</Fact>}
-        </dl>
-      </section>
-
-      <section>
-        <h2>{isProject ? "Project report" : "Paper"}</h2>
-        <ReportButtons reportUrl={item.reportUrl} filename={item.originalReportName} />
-      </section>
-
-      {isProject && item.githubUrl && (
-        <section>
-          <h2>Project repository</h2>
-          <a className="btn quiet" href={item.githubUrl} {...EXTERNAL}>View project repository</a>
-        </section>
-      )}
-      {!isProject && item.externalUrl && (
-        <section>
-          <h2>Published version</h2>
-          <a className="btn quiet" href={item.externalUrl} {...EXTERNAL}>View paper online</a>
-        </section>
-      )}
-
-      {canDelete && (
-        <section>
-          <button className="btn danger small" onClick={remove}>Delete submission</button>
-        </section>
-      )}
-    </div>
-  );
-}
-
-function Fact({ label, children }) {
-  return (
-    <div className="fact">
-      <dt>{label}</dt>
-      <dd>{children}</dd>
-    </div>
-  );
-}
-
-function ReviewPanel({ base, id, onDone }) {
-  const [rejecting, setRejecting] = useState(false);
+function ReviewPanel({ item, base, onDone }) {
+  const [mode, setMode] = useState(null);
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState("");
 
-  const act = async (path, body) => {
+  const submit = async () => {
     setBusy(true);
-    setError(null);
+    setError("");
+
     try {
-      onDone(await api.put(`${base}/${id}/${path}`, body));
+      if (mode === "approve") {
+        await api.put(`${base}/${item.id}/approve`);
+      } else {
+        if (!reason.trim()) {
+          setError("Please provide a reason for rejection.");
+          setBusy(false);
+          return;
+        }
+
+        await api.put(`${base}/${item.id}/reject`, {
+          reason: reason.trim(),
+        });
+      }
+
+      onDone();
     } catch (e) {
-      setError(e);
+      setError(errorMessage(e));
       setBusy(false);
     }
   };
 
   return (
-    <div className="callout review">
-      <strong>Your decision</strong>
-      <p>Read the abstract and the report, then approve it for the repository or send it back with a reason.</p>
-      <Notice>{error ? errorMessage(error) : ""}</Notice>
-      {!rejecting ? (
-        <div className="button-row">
-          <button className="btn primary" disabled={busy} onClick={() => act("approve")}>Approve</button>
-          <button className="btn quiet" disabled={busy} onClick={() => setRejecting(true)}>Reject…</button>
+    <section className="review-panel">
+      <div className="review-panel-heading">
+        <div>
+          <span className="section-eyebrow">FACULTY ACTION</span>
+          <h2>Review submission</h2>
         </div>
-      ) : (
-        <>
-          <label htmlFor="reason">Reason for rejection (the student will see this)</label>
-          <textarea id="reason" rows={4} value={reason} onChange={(e) => setReason(e.target.value)} />
-          <div className="button-row">
-            <button className="btn danger" disabled={busy || !reason.trim()} onClick={() => act("reject", { reason })}>Reject submission</button>
-            <button className="btn quiet" disabled={busy} onClick={() => setRejecting(false)}>Cancel</button>
-          </div>
-        </>
+
+        <span className="review-panel-note">
+          {mode === "approve"
+            ? "Ready to approve"
+            : mode === "reject"
+              ? "Rejection required"
+              : "Choose an action"}
+        </span>
+      </div>
+
+      <Notice>{error}</Notice>
+
+      {!mode && (
+        <div className="review-actions">
+          <button
+            className="review-approve"
+            onClick={() => setMode("approve")}
+          >
+            Approve submission
+            <span>→</span>
+          </button>
+
+          <button
+            className="review-reject"
+            onClick={() => setMode("reject")}
+          >
+            Reject submission
+            <span>→</span>
+          </button>
+        </div>
       )}
+
+      {mode === "approve" && (
+        <div className="review-confirm">
+          <p>
+            Are you sure you want to approve this submission? It will become
+            part of the department repository.
+          </p>
+
+          <div className="review-confirm-actions">
+            <button
+              className="review-approve"
+              disabled={busy}
+              onClick={submit}
+            >
+              {busy ? "Approving..." : "Confirm approval →"}
+            </button>
+
+            <button
+              className="review-cancel"
+              disabled={busy}
+              onClick={() => setMode(null)}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {mode === "reject" && (
+        <div className="review-confirm">
+          <label htmlFor="rejection-reason">Reason for rejection</label>
+
+          <textarea
+            id="rejection-reason"
+            rows="5"
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="Explain what the student needs to change before resubmitting..."
+          />
+
+          <div className="review-confirm-actions">
+            <button
+              className="review-reject"
+              disabled={busy}
+              onClick={submit}
+            >
+              {busy ? "Rejecting..." : "Confirm rejection →"}
+            </button>
+
+            <button
+              className="review-cancel"
+              disabled={busy}
+              onClick={() => setMode(null)}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+export default function ItemDetail() {
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const { user } = useAuth();
+
+  const [item, setItem] = useState(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const project = await api.get(`/api/projects/${id}`);
+        setItem(project);
+      } catch {
+        try {
+          const paper = await api.get(`/api/research-papers/${id}`);
+          setItem(paper);
+        } catch (e) {
+          setError(errorMessage(e));
+        }
+      }
+    };
+
+    load();
+  }, [id]);
+
+  if (error) {
+    return (
+      <div className="container detail-page">
+        <Notice>{error}</Notice>
+        <Link className="detail-back" to="/">
+          ← Back to repository
+        </Link>
+      </div>
+    );
+  }
+
+  if (!item) {
+    return (
+      <div className="container detail-page">
+        <p className="muted">Loading submission...</p>
+      </div>
+    );
+  }
+
+  const isProject =
+    item.type === "PROJECT" ||
+    item.kind === "PROJECT" ||
+    item.projectType === "PROJECT";
+
+  const base = isProject
+    ? "/api/projects"
+    : "/api/research-papers";
+
+  const isReviewable =
+    ["PENDING", "RESUBMITTED"].includes(item.status) &&
+    (user?.role === "FACULTY" || user?.role === "ADMIN");
+
+  const isOwner =
+    user?.id === item.studentId ||
+    user?.id === item.ownerId ||
+    user?.email === item.studentEmail;
+
+  const canEdit =
+    user?.role === "STUDENT" &&
+    isOwner &&
+    item.status === "REJECTED";
+
+  const canDelete =
+    user?.role === "ADMIN" ||
+    (user?.role === "STUDENT" && isOwner && item.status !== "APPROVED");
+
+  const handleDelete = async () => {
+    const confirmed = window.confirm(
+      "Are you sure you want to delete this submission?"
+    );
+
+    if (!confirmed) return;
+
+    try {
+      await api.del(`${base}/${item.id}`);
+
+      if (user?.role === "ADMIN") {
+        navigate("/admin");
+      } else {
+        navigate("/student");
+      }
+    } catch (e) {
+      setError(errorMessage(e));
+    }
+  };
+
+  const handleReviewDone = () => {
+    window.location.reload();
+  };
+
+  return (
+    <div className="container detail-page">
+
+      {/* BACK */}
+      <Link
+        className="detail-back"
+        to={user?.role === "FACULTY" ? "/faculty" : "/"}
+      >
+        ← Back
+      </Link>
+
+      {/* HEADER */}
+      <header className="detail-header">
+
+        <div className="detail-header-main">
+          <div className="detail-type-row">
+            <span className="detail-type">
+              {typeLabel(item.type)}
+            </span>
+
+            <span className="detail-dot">•</span>
+
+            <span className="detail-date">
+              Submitted {formatDate(item.submittedAt)}
+            </span>
+          </div>
+
+          <h1>{item.title}</h1>
+
+          <p className="detail-category">
+            {item.category}
+            {item.academicYear ? ` · ${item.academicYear}` : ""}
+          </p>
+        </div>
+
+        <div className="detail-status">
+          <StatusBadge status={item.status} />
+        </div>
+
+      </header>
+
+      {/* REJECTION MESSAGE */}
+      {item.status === "REJECTED" && item.rejectionReason && (
+        <section className="detail-rejection">
+          <div className="detail-rejection-icon">!</div>
+
+          <div>
+            <span className="section-eyebrow">REVISION REQUIRED</span>
+            <h2>Submission was rejected</h2>
+            <p>{item.rejectionReason}</p>
+
+            {canEdit && (
+              <Link
+                className="detail-primary-btn"
+                to={`/student/edit/${isProject ? "project" : "paper"}/${item.id}`}
+              >
+                Edit and resubmit →
+              </Link>
+            )}
+          </div>
+        </section>
+      )}
+
+      {/* FACULTY REVIEW */}
+      {isReviewable && (
+        <ReviewPanel
+          item={item}
+          base={base}
+          onDone={handleReviewDone}
+        />
+      )}
+
+      {/* MAIN GRID */}
+      <div className="detail-grid">
+
+        {/* LEFT */}
+        <main className="detail-main">
+
+          <section className="detail-section">
+            <div className="detail-section-heading">
+              <span className="section-number">01</span>
+
+              <div>
+                <span className="section-eyebrow">OVERVIEW</span>
+                <h2>Abstract</h2>
+              </div>
+            </div>
+
+            <p className="detail-abstract">
+              {item.abstract || "No abstract provided."}
+            </p>
+          </section>
+
+          <section className="detail-section">
+            <div className="detail-section-heading">
+              <span className="section-number">02</span>
+
+              <div>
+                <span className="section-eyebrow">PROJECT INFORMATION</span>
+                <h2>Submission details</h2>
+              </div>
+            </div>
+
+            <div className="detail-facts">
+
+              {item.facultyName && (
+                <div className="detail-fact">
+                  <span>Faculty guide</span>
+                  <strong>{item.facultyName}</strong>
+                </div>
+              )}
+
+              {item.category && (
+                <div className="detail-fact">
+                  <span>Category</span>
+                  <strong>{item.category}</strong>
+                </div>
+              )}
+
+              {item.academicYear && (
+                <div className="detail-fact">
+                  <span>Academic year</span>
+                  <strong>{item.academicYear}</strong>
+                </div>
+              )}
+
+              {item.submittedAt && (
+                <div className="detail-fact">
+                  <span>Submitted</span>
+                  <strong>{formatDate(item.submittedAt)}</strong>
+                </div>
+              )}
+
+            </div>
+          </section>
+
+          {item.people && item.people.length > 0 && (
+            <section className="detail-section">
+              <div className="detail-section-heading">
+                <span className="section-number">03</span>
+
+                <div>
+                  <span className="section-eyebrow">CONTRIBUTORS</span>
+                  <h2>Students / authors</h2>
+                </div>
+              </div>
+
+              <div className="detail-people">
+                {item.people.map((person, index) => (
+                  <div className="detail-person" key={index}>
+                    <span className="person-number">
+                      {String(index + 1).padStart(2, "0")}
+                    </span>
+
+                    <span>{person}</span>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+        </main>
+
+        {/* RIGHT SIDEBAR */}
+        <aside className="detail-sidebar">
+
+          {/* RESOURCES */}
+          <section className="detail-side-card">
+            <span className="section-eyebrow">RESOURCES</span>
+            <h2>Project files</h2>
+
+            <div className="resource-list">
+
+              {item.reportUrl && (
+                <a
+                  className="resource-item"
+                  href={item.reportUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <span className="resource-icon">PDF</span>
+
+                  <span>
+                    <strong>Project report</strong>
+                    <small>Open PDF document</small>
+                  </span>
+
+                  <span className="resource-arrow">↗</span>
+                </a>
+              )}
+
+              {item.githubUrl && (
+                <a
+                  className="resource-item"
+                  href={item.githubUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <span className="resource-icon">GH</span>
+
+                  <span>
+                    <strong>GitHub repository</strong>
+                    <small>View source code</small>
+                  </span>
+
+                  <span className="resource-arrow">↗</span>
+                </a>
+              )}
+
+              {item.externalUrl && (
+                <a
+                  className="resource-item"
+                  href={item.externalUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <span className="resource-icon">↗</span>
+
+                  <span>
+                    <strong>Project link</strong>
+                    <small>Open external resource</small>
+                  </span>
+
+                  <span className="resource-arrow">↗</span>
+                </a>
+              )}
+
+              {!item.reportUrl &&
+                !item.githubUrl &&
+                !item.externalUrl && (
+                  <p className="muted">No external resources provided.</p>
+                )}
+
+            </div>
+          </section>
+
+          {/* TECHNOLOGIES */}
+          {item.technologies?.length > 0 && (
+            <section className="detail-side-card">
+              <span className="section-eyebrow">TECH STACK</span>
+              <h2>Technologies</h2>
+
+              <div className="tag-list">
+                {item.technologies.map((technology, index) => (
+                  <span className="detail-tag" key={index}>
+                    {technology}
+                  </span>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* KEYWORDS */}
+          {item.keywords?.length > 0 && (
+            <section className="detail-side-card">
+              <span className="section-eyebrow">DISCOVERY</span>
+              <h2>Keywords</h2>
+
+              <div className="tag-list">
+                {item.keywords.map((keyword, index) => (
+                  <span className="detail-tag muted-tag" key={index}>
+                    {keyword}
+                  </span>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* ACTIONS */}
+          {(canDelete || canEdit) && (
+            <section className="detail-side-card detail-management">
+              <span className="section-eyebrow">MANAGEMENT</span>
+              <h2>Submission actions</h2>
+
+              {canEdit && (
+                <Link
+                  className="management-btn"
+                  to={`/student/edit/${isProject ? "project" : "paper"}/${item.id}`}
+                >
+                  Edit submission
+                </Link>
+              )}
+
+              {canDelete && (
+                <button
+                  className="management-delete"
+                  onClick={handleDelete}
+                >
+                  Delete submission
+                </button>
+              )}
+            </section>
+          )}
+
+        </aside>
+      </div>
+
+      <Notice>{error}</Notice>
+
     </div>
   );
 }
