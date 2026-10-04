@@ -138,23 +138,94 @@ export default function Repository() {
 
 function Entry({ item }) {
   const isPaper = item.type === "RESEARCH_PAPER";
+
   return (
-    <article className="entry">
-      <h2><Link to={itemPath(item)}>{item.title}</Link></h2>
-      <p className="meta">
-        {typeLabel(item.type)} · {item.category} · {isPaper && item.publicationYear ? item.publicationYear : item.academicYear}
-      </p>
-      {item.people.length > 0 && (
-        <p><span className="label">{isPaper ? "Authors:" : "Team:"}</span> {item.people.join(", ")}</p>
-      )}
-      {item.keywords.length > 0 && (
-        <p><span className="label">Keywords:</span> {item.keywords.join(" · ")}</p>
-      )}
-      {!isPaper && item.technologies.length > 0 && (
-        <p><span className="label">Built with:</span> {item.technologies.join(" · ")}</p>
-      )}
-      <p className="preview"><span className="label">Abstract:</span> {item.abstractPreview}</p>
-      <Link className="entry-link" to={itemPath(item)}>{isPaper ? "View paper" : "View project"}</Link>
+    <article className="repository-entry">
+
+      <div className="repository-entry-main">
+
+        <div className="repository-entry-title">
+          <div className="repository-entry-type">
+            {isPaper ? "RESEARCH PAPER" : "CAPSTONE PROJECT"}
+          </div>
+
+          <h2>
+            <Link to={itemPath(item)}>
+              {item.title}
+            </Link>
+          </h2>
+
+          <div className="repository-meta">
+            <span>{item.category}</span>
+            <span>•</span>
+            <span>{typeLabel(item.type)}</span>
+          </div>
+        </div>
+
+        <div className="repository-entry-column">
+          <span className="repository-label">
+            {isPaper ? "AUTHORS" : "TEAM"}
+          </span>
+
+          <p>
+            {item.people.length > 0
+              ? item.people.join(", ")
+              : "—"}
+          </p>
+        </div>
+
+        <div className="repository-entry-column">
+          <span className="repository-label">
+            {isPaper ? "RESEARCH AREAS" : "TECHNOLOGIES"}
+          </span>
+
+          <div className="repository-tags">
+            {(isPaper ? item.keywords : item.technologies)
+              .slice(0, 4)
+              .map((tag) => (
+                <span className="repository-tag" key={tag}>
+                  {tag}
+                </span>
+              ))}
+          </div>
+        </div>
+
+        <div className="repository-entry-year">
+          <span className="repository-label">
+            YEAR
+          </span>
+
+          <strong>
+            {isPaper && item.publicationYear
+              ? item.publicationYear
+              : item.academicYear}
+          </strong>
+        </div>
+
+      </div>
+
+      <div className="repository-entry-bottom">
+
+        <div className="repository-abstract">
+          <span className="repository-label">
+            ABSTRACT
+          </span>
+
+          <p>
+            {item.abstractPreview}
+          </p>
+        </div>
+
+        <Link
+          className="entry-link"
+          to={itemPath(item)}
+        >
+          {isPaper ? "View paper" : "View project"}
+          <span>→</span>
+        </Link>
+
+      </div>
+
     </article>
   );
 }
