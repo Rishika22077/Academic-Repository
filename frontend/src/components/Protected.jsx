@@ -1,5 +1,5 @@
 import { Navigate, useLocation } from "react-router-dom";
-import { LANDING, useAuth } from "../Auth.jsx";
+import { LANDING, useAuth } from "../auth.jsx";
 
 /** Redirects to login when signed out, and away from pages the role may not use. */
 export default function Protected({ roles, children }) {

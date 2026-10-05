@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api } from "../api.js";
-import { useAuth } from "../Auth.jsx";
+import { useAuth } from "../auth.jsx";
 import {
   Field,
   Notice,

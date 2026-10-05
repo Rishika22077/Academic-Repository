@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
-import { LANDING, useAuth } from "../Auth.jsx";
+import { LANDING, useAuth } from "../auth.jsx";
 import { Field, Notice, errorMessage } from "../components/common.jsx";
 export default function Login() {
   const { user, login } = useAuth();

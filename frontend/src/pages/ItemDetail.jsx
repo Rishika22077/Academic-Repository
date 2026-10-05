@@ -8,7 +8,7 @@ import {
   formatDate,
   typeLabel,
 } from "../components/common.jsx";
-import { useAuth } from "../Auth.jsx";
+import { useAuth } from "../auth.jsx";
 
 function ReviewPanel({ item, base, onDone }) {
   const [mode, setMode] = useState(null);
