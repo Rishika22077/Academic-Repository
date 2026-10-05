@@ -6,7 +6,7 @@ spring:
     name: departmental-archive
 
   datasource:
-    url: jdbc:postgresql://localhost:5432/archive_db
+    url: ${DB_URL}
     username: ${DB_USER}
     password: ${DB_PASSWORD}
 
